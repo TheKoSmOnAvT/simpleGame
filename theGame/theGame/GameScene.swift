@@ -9,6 +9,12 @@
 import SpriteKit
 import GameplayKit
 
+struct PhysicsCategory {
+    static let skater: UInt32 = 0x1 << 0
+    static let brick: UInt32 = 0x1 << 1
+    static let gem: UInt32 = 0x1 << 2
+}
+
 class GameScene: SKScene {
     let skater = Skater(imageNamed: "skater")
     private var label : SKLabelNode?
@@ -21,6 +27,7 @@ class GameScene: SKScene {
     let gravitySpeed: CGFloat = 1.5
     
     override func didMove(to view: SKView) {
+        physicsWorld.gravity = CGVector(dx: 0.0, dy: -6.0)
         anchorPoint = CGPoint.zero
         
         let background = SKSpriteNode(imageNamed: "background")
@@ -28,7 +35,7 @@ class GameScene: SKScene {
         let yMid = frame.midY
         background.position = CGPoint(x: xMid, y: yMid)
         addChild(background)
-        
+        skater.setupPhysicsBody()
         resetSkater()
         addChild(skater)
         
@@ -77,6 +84,11 @@ class GameScene: SKScene {
         addChild(brick)
         brickSize = brick.size
         bricks.append(brick)
+        let center = brick.centerRect.origin
+        brick.physicsBody = SKPhysicsBody(rectangleOf: brick.size, center: center)
+        brick.physicsBody?.affectedByGravity = false
+        brick.physicsBody?.categoryBitMask = PhysicsCategory.brick
+        brick.physicsBody?.collisionBitMask = 0
         return brick
     }
     
