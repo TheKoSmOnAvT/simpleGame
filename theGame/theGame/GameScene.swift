@@ -20,17 +20,28 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var label : SKLabelNode?
     private var spinnyNode : SKShapeNode?
     let startingScrollSpeed: CGFloat = 5.0
+    
     var bricks = [SKSpriteNode]()
+    var gems = [SKSpriteNode]()
+    
     var brickSize = CGSize.zero
     var brickLevel = BrickLevel.low
     var scrollSpeed: CGFloat = 5.0
     var lastUpdateTime: TimeInterval?
     
+    var score: Int = 0
+    var highScore: Int = 0
+    var lastScoreUpdateTime: TimeInterval = 0.0
+    var gameState = GameState.notRunning
+    
     enum BrickLevel: CGFloat {
         case low = 0.0
         case high = 100.0
     }
-    
+    enum GameState {
+        case notRunning
+        case running
+    }
     
     let gravitySpeed: CGFloat = 1.5
     
@@ -44,14 +55,24 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let yMid = frame.midY
         background.position = CGPoint(x: xMid, y: yMid)
         addChild(background)
+        setupLabels()
+
         skater.setupPhysicsBody()
         addChild(skater)
         
         let tapMethod = #selector(GameScene.handleTap(tapGesture:))
         let tapGesture = UITapGestureRecognizer(target: self, action: tapMethod)
         view.addGestureRecognizer(tapGesture)
-        startGame()
+        //startGame()
         
+        let menuBackgroundColor = UIColor.black.withAlphaComponent(0.4)
+        let menuLayer = MenuLayer(color: menuBackgroundColor,  size: frame.size)
+        menuLayer.anchorPoint = CGPoint(x: 0.0, y: 0.0)
+        menuLayer.position = CGPoint(x: 0.0, y: 0.0)
+        menuLayer.zPosition = 30
+        menuLayer.name = "menuLayer"
+        menuLayer.display(message: "Нажмите, чтобы играть", score: nil)
+          addChild(menuLayer)
     }
     
     @objc func handleTap(tapGesture : UITapGestureRecognizer){
@@ -59,12 +80,23 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 //            skater.velocity = CGPoint(x: 0.0, y: skater.jumpSpeed)
 //            skater.isOnGround = false
 //        }
-        if skater.isOnGround {
-            skater.physicsBody?.applyImpulse(CGVector(dx: 0.0, dy: 260.0))
+        if gameState == .running {
+            if skater.isOnGround {
+                skater.physicsBody?.applyImpulse(CGVector(dx: 0.0, dy: 260.0))
+            }
+        } else{
+
+        if let menuLayer: SKSpriteNode = childNode(withName:  "menuLayer") as? SKSpriteNode {
+            menuLayer.removeFromParent()
+        }
+            startGame()
         }
     }
     
     override func update(_ currentTime: TimeInterval) {
+        if gameState != .running {
+            return
+        }
         scrollSpeed += 0.01
         var elapsedTime: TimeInterval = 0.0
         if let lastTimeStamp = lastUpdateTime {
@@ -78,6 +110,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let currentScrollAmount = scrollSpeed * scrollAdjustment
         updateBricks(withScrollAmount: currentScrollAmount)
          updateSkater()
+        updateGems(withScrollAmount: currentScrollAmount)
+        updateScore(withCurrentTime: currentTime)
     }
     
     func resetSkater(){
@@ -109,19 +143,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     func updateSkater() {
-//        if !skater.isOnGround {
-//            let velocityY = skater.velocity.y - gravitySpeed
-//            skater.velocity = CGPoint(x: skater.velocity.x, y: velocityY)
-//            let newSkaterY: CGFloat = skater.position.y +  skater.velocity.y
-//            skater.position = CGPoint(x: skater.position.x,  y: newSkaterY)
-//        }
-//
-//        if skater.position.y < skater.minimumY {
-//            skater.position.y = skater.minimumY
-//            skater.velocity = CGPoint.zero
-//            skater.isOnGround = true
-//        }
-        
         if let velocityY = skater.physicsBody?.velocity.dy {
             if velocityY < -100.0 || velocityY > 100.0 {
             skater.isOnGround = false
@@ -142,6 +163,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         // Проверяем, есть ли контакт между скейтбордисткой и секцией
         if contact.bodyA.categoryBitMask == PhysicsCategory.skater && contact.bodyB.categoryBitMask == PhysicsCategory.brick {
                 skater.isOnGround = true
+        } else if contact.bodyA.categoryBitMask == PhysicsCategory.skater &&  contact.bodyB.categoryBitMask == PhysicsCategory.gem {
+            // Скейтбордистка коснулась алмаза, поэтому мы его убираем
+            if let gem = contact.bodyB.node as? SKSpriteNode {
+                removeGem(gem)
+                score += 50
+                updateScoreLabelText()
+            }
         }
     }
     
@@ -165,10 +193,14 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             var brickX = farthestRightBrickX + brickSize.width + 1.0
             let brickY = (brickSize.height / 2.0) + brickLevel.rawValue
             let randomNumber = arc4random_uniform(99)
-            if randomNumber < 5 {
+           if randomNumber < 2 && score > 10 {
                 let gap = 20.0 * scrollSpeed
                 brickX += gap
-            }  else if  randomNumber < 10 {
+                let randomGemYAmount = CGFloat(arc4random_uniform(150))
+                let newGemY = brickY + skater.size.height + randomGemYAmount
+                let newGemX = brickX - gap / 2.0
+                spawnGem(atPosition: CGPoint(x: newGemX, y: newGemY))
+            }  else if randomNumber < 4 && score > 20 {
                 if brickLevel == .high {
                     brickLevel = .low
                 } else if brickLevel == .low {
@@ -181,19 +213,128 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     func startGame() {
+        score = 0
         resetSkater()
         scrollSpeed = startingScrollSpeed
         brickLevel = .low
         lastUpdateTime = nil
+        gameState = .running
         for brick in bricks {
             brick.removeFromParent()
         }
         bricks.removeAll(keepingCapacity: true)
+        for gem in gems {
+            removeGem(gem)
+            
+        }
     }
     func gameOver() {
-        startGame()
+        gameState = .notRunning
+        if score > highScore {
+            highScore = score
+            updateHighScoreLabelText()
+        }
+        //startGame()
+        let menuBackgroundColor = UIColor.black.withAlphaComponent(0.4)
+        let menuLayer = MenuLayer(color: menuBackgroundColor, size: frame.size)
+        menuLayer.anchorPoint = CGPoint.zero
+        menuLayer.position = CGPoint.zero
+        menuLayer.zPosition = 30
+        menuLayer.name = "menuLayer"
+        menuLayer.display(message: "Игра окончена!", score: score)
+        addChild(menuLayer)
         
     }
     
+    func spawnGem(atPosition position: CGPoint) {
+        let gem = SKSpriteNode(imageNamed: "gem")
+        gem.position = position
+        gem.zPosition = 9
+        addChild(gem)
+        gem.physicsBody = SKPhysicsBody(rectangleOf: gem.size,  center: gem.centerRect.origin)
+        gem.physicsBody?.categoryBitMask = PhysicsCategory.gem
+        gem.physicsBody?.affectedByGravity = false
+        gems.append(gem)
+    }
+ 
+    func removeGem(_ gem: SKSpriteNode) {
+        gem.removeFromParent()
+
+        if let gemIndex = gems.index(of: gem) {
+            gems.remove(at: gemIndex)
+        }
+    }
     
+    func updateGems(withScrollAmount currentScrollAmount: CGFloat) {
+        for gem in gems {
+            let thisGemX = gem.position.x - currentScrollAmount
+            gem.position = CGPoint(x: thisGemX, y: gem.position.y)
+            // Удаляем любые алмазы, ушедшие с экрана
+            if gem.position.x < 0.0 {
+                removeGem(gem) }
+            }
+    }
+    
+    func setupLabels() {
+        
+    let scoreTextLabel: SKLabelNode = SKLabelNode(text: "очки")
+        scoreTextLabel.position = CGPoint(x: 14.0,    y: frame.size.height - 20.0)
+        scoreTextLabel.horizontalAlignmentMode = .left
+        scoreTextLabel.fontName = "Courier-Bold"
+        scoreTextLabel.fontSize = 14.0
+        scoreTextLabel.zPosition = 20
+        addChild(scoreTextLabel)
+        let scoreLabel: SKLabelNode = SKLabelNode(text: "0")
+        scoreLabel.position = CGPoint(x: 14.0,      y: frame.size.height - 40.0)
+        scoreLabel.horizontalAlignmentMode = .left
+        scoreLabel.fontName = "Courier-Bold"
+        scoreLabel.fontSize = 18.0
+        scoreLabel.name = "scoreLabel"
+        scoreLabel.zPosition = 20
+        addChild(scoreLabel)
+        
+        let highScoreTextLabel: SKLabelNode = SKLabelNode(text:  "лучший результат")
+        highScoreTextLabel.position = CGPoint(x: frame.size.width - 14.0, y: frame.size.height - 20.0)
+        
+        highScoreTextLabel.horizontalAlignmentMode = .right
+        highScoreTextLabel.fontName = "Courier-Bold"
+        highScoreTextLabel.fontSize = 14.0
+        highScoreTextLabel.zPosition = 20
+        addChild(highScoreTextLabel)
+        // Надпись с максимумом набранных игроком очков
+        let highScoreLabel: SKLabelNode = SKLabelNode(text: "0")
+        highScoreLabel.position = CGPoint(x: frame.size.width - 14.0,
+                                              y: frame.size.height - 40.0)
+        highScoreLabel.horizontalAlignmentMode = .right
+        highScoreLabel.fontName = "Courier-Bold"
+        highScoreLabel.fontSize = 18.0
+        highScoreLabel.name = "highScoreLabel"
+        highScoreLabel.zPosition = 20
+        addChild(highScoreLabel)
+    }
+    
+    func updateScoreLabelText() {
+        if let scoreLabel = childNode(withName: "scoreLabel") as?    SKLabelNode {
+            scoreLabel.text = String(format: "%04d", score)
+        }
+    }
+    
+    func updateScore(withCurrentTime currentTime: TimeInterval) {
+        
+    let elapsedTime = currentTime - lastScoreUpdateTime
+        if elapsedTime > 1.0 {
+            score += Int(scrollSpeed)
+            
+            lastScoreUpdateTime = currentTime
+            updateScoreLabelText()
+        }
+        
+    }
+    func updateHighScoreLabelText() {
+    if let highScoreLabel = childNode(withName: "highScoreLabel")
+           as? SKLabelNode {
+                highScoreLabel.text = String(format: "%04d", highScore)
+            
+        }
+    }
 }
